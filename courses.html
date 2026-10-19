@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Courses | Temo-Learn</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="page-courses">
+
+  <div id="site-header"></div>
+
+  <main>
+    <section class="page-hero">
+      <div class="container">
+        <span class="hud-chip">Course library</span>
+        <h1 class="gold-text">Courses</h1>
+        <p>Ten practical courses, four modules each. Click any card to open its syllabus and see exactly what you'll learn.</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <div class="filters" id="filters"></div>
+        <div class="grid-courses" id="grid"></div>
+        <noscript><p>Please turn on JavaScript to browse the courses.</p></noscript>
+      </div>
+    </section>
+  </main>
+
+  <div id="site-footer"></div>
+
+  <script type="module" src="js/layout.js"></script>
+  <script type="module" src="js/nav.js"></script>
+  <script type="module">
+    import { COURSES, cardHTML, mergeCourses } from "./js/course-data.js";
+
+    const grid = document.getElementById("grid");
+    const filters = document.getElementById("filters");
+    let courses = [...COURSES];
+    let active = "All";
+    let openId = decodeURIComponent(location.hash.slice(1));
+    let session = { user: null, profile: null };
+
+    const homeFor = (role) => ({
+      admin: "/portal/admin.html",
+      teacher: "/portal/teacher.html",
+      student: "/portal/student.html"
+    }[role] || "/portal/student.html");
+
+    function ctaHTML() {
+      if (session.user && session.profile) {
+        return `<a class="btn btn-gold" href="${homeFor(session.profile.role)}">Go to my dashboard</a>`;
+      }
+      return `<a class="btn btn-gold" href="signup.html">Sign up to start</a>
+              <a class="btn btn-ghost" href="login.html">Log in</a>`;
+    }
+
+    const findCard = (id) => grid.querySelector(`[data-id="${CSS.escape(id)}"]`);
+
+    function setOpen(card, open) {
+      card.classList.toggle("open", open);
+      card.querySelector(".course-head").setAttribute("aria-expanded", String(open));
+    }
+
+    function renderFilters() {
+      filters.replaceChildren();
+      ["All", ...new Set(courses.map((c) => c.category))].forEach((cat) => {
+        const b = document.createElement("button");
+        b.className = "filter-btn" + (cat === active ? " active" : "");
+        b.textContent = cat;
+        b.onclick = () => { active = cat; renderFilters(); renderGrid(); };
+        filters.appendChild(b);
+      });
+    }
+
+    function renderGrid() {
+      const list = active === "All" ? courses : courses.filter((c) => c.category === active);
+      const cta = ctaHTML();
+      grid.innerHTML = list.map((c) => cardHTML(c, { expandable: true, cta })).join("")
+        || "<p>No courses in this group yet.</p>";
+      if (openId) {
+        const card = findCard(openId);
+        if (card) setOpen(card, true);
+      }
+    }
+
+    function toggle(id) {
+      const card = findCard(id);
+      if (!card) return;
+      const wasOpen = card.classList.contains("open");
+      grid.querySelectorAll(".course-card.open").forEach((c) => setOpen(c, false));
+      if (wasOpen) {
+        openId = "";
+        history.replaceState(null, "", location.pathname);
+        return;
+      }
+      setOpen(card, true);
+      openId = id;
+      history.replaceState(null, "", "#" + encodeURIComponent(id));
+      setTimeout(() => card.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
+    }
+
+    grid.addEventListener("click", (e) => {
+      const head = e.target.closest(".course-head");
+      if (head) toggle(head.closest(".course-card").dataset.id);
+    });
+    grid.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      const head = e.target.closest(".course-head");
+      if (!head || e.target !== head) return;
+      e.preventDefault();
+      toggle(head.closest(".course-card").dataset.id);
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && openId) toggle(openId);
+    });
+
+    // 1) Show the built-in 10 courses straight away
+    renderFilters();
+    renderGrid();
+    if (openId) {
+      const first = findCard(openId);
+      if (first) setTimeout(() => first.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
+    }
+
+    // 2) Then add anything teachers have published (never blocks the page)
+    (async () => {
+      try {
+        const { fetchLiveCourses } = await import("./js/live-courses.js");
+        const live = await fetchLiveCourses();
+        if (live.length) { courses = mergeCourses(live); renderFilters(); renderGrid(); }
+      } catch (err) { console.warn("Live courses unavailable:", err); }
+    })();
+
+    // 3) And switch the buttons if the visitor is signed in
+    (async () => {
+      try {
+        const nav = await import("./js/nav.js");
+        nav.onSession((s) => { session = s; renderGrid(); });
+      } catch (err) { console.warn("Sign-in state unavailable:", err); }
+    })();
+  </script>
+</body>
+</html>

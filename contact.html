@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Contact | Temo-Learn</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="page-contact">
+
+  <div id="site-header"></div>
+
+  <main>
+    <section class="page-hero">
+      <div class="container">
+        <span class="hud-chip">Get in touch</span>
+        <h1 class="gold-text">Contact us</h1>
+        <p>Questions, ideas or bugs? Send a message and we'll get back to you.</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container split">
+        <div>
+          <div class="panel-dark info-card">
+            <h3>📜 Questions about a course?</h3>
+            <p>Tell us which course and what you'd like to know.</p>
+          </div>
+          <div class="panel-dark info-card">
+            <h3>🎓 Want to teach?</h3>
+            <p>Teacher accounts are set up by an admin. Message us with what you'd like to teach.</p>
+          </div>
+          <div class="panel-dark info-card">
+            <h3>🐞 Found a bug?</h3>
+            <p>Tell us what you clicked and what happened, and we'll fix it.</p>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>Write your message</h2>
+          <form id="form">
+            <div class="field"><label for="name">Your name</label><input id="name" maxlength="100" required></div>
+            <div class="field"><label for="email">Email</label><input id="email" type="email" maxlength="150" required></div>
+            <div class="field">
+              <label for="subject">Topic</label>
+              <select id="subject">
+                <option>Question about a course</option>
+                <option>I want to teach on Temo-Learn</option>
+                <option>Report a problem</option>
+                <option>Something else</option>
+              </select>
+            </div>
+            <div class="field"><label for="message">Message</label><textarea id="message" maxlength="2000" required></textarea></div>
+            <input class="hp" id="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+            <p class="form-msg" id="msg"></p>
+            <button class="btn btn-gold btn-block" id="send">Send message</button>
+          </form>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="site-footer"></div>
+
+  <script type="module" src="js/layout.js"></script>
+  <script type="module" src="js/nav.js"></script>
+  <script type="module">
+    import { db, collection, addDoc, serverTimestamp } from "./js/firebase.js";
+
+    const form = document.getElementById("form");
+    const msg = document.getElementById("msg");
+    const send = document.getElementById("send");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (document.getElementById("website").value) return; // bots fill this in
+      msg.className = "form-msg";
+      msg.textContent = "";
+      send.disabled = true;
+      send.textContent = "Sending...";
+      try {
+        await addDoc(collection(db, "messages"), {
+          name: document.getElementById("name").value.trim(),
+          email: document.getElementById("email").value.trim(),
+          subject: document.getElementById("subject").value,
+          message: document.getElementById("message").value.trim(),
+          createdAt: serverTimestamp()
+        });
+        form.reset();
+        msg.className = "form-msg ok";
+        msg.textContent = "Message sent. Thank you, we'll be in touch.";
+      } catch (err) {
+        console.error(err);
+        msg.className = "form-msg error";
+        msg.textContent = "Couldn't send that. Please try again in a moment.";
+      }
+      send.disabled = false;
+      send.textContent = "Send message";
+    });
+  </script>
+</body>
+</html>

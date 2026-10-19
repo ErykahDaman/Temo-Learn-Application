@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Log in | Temo-Learn</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="auth-page page-login">
+
+  <div id="site-header"></div>
+
+  <main>
+    <div class="panel frame">
+      <img class="frame-logo" src="images/logo-mark.png" alt="Temo-Learn" onerror="this.remove()">
+      <h1>Welcome back</h1>
+      <p class="sub">Log in to continue learning.</p>
+      <form id="form">
+        <div class="field"><label for="email">Email</label><input id="email" type="email" autocomplete="email" required></div>
+        <div class="field"><label for="password">Password</label><input id="password" type="password" autocomplete="current-password" required></div>
+        <p class="form-msg" id="msg"></p>
+        <button class="btn btn-gold btn-block" id="submitBtn">Log in</button>
+      </form>
+      <p class="form-alt"><button class="link-btn" id="forgot" type="button">Forgot your password?</button></p>
+      <p class="form-alt">New here? <a href="signup.html">Create an account</a></p>
+    </div>
+  </main>
+
+  <div id="site-footer"></div>
+
+  <script type="module" src="js/layout.js"></script>
+  <script type="module" src="js/nav.js"></script>
+  <script type="module">
+    import { logIn, homeFor, friendlyError } from "./js/auth.js";
+    import { auth, sendPasswordResetEmail } from "./js/firebase.js";
+
+    const form = document.getElementById("form");
+    const msg = document.getElementById("msg");
+    const email = document.getElementById("email");
+    const password = document.getElementById("password");
+    const btn = document.getElementById("submitBtn");
+
+    function say(text, kind = "") { msg.className = "form-msg " + kind; msg.textContent = text; }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      say("");
+      btn.disabled = true;
+      btn.textContent = "Logging in...";
+      try {
+        const profile = await logIn(email.value.trim(), password.value);
+        if (!profile) throw new Error("Your account has no profile yet. Please contact us.");
+        location.href = homeFor(profile.role);
+      } catch (err) {
+        say(friendlyError(err), "error");
+        btn.disabled = false;
+        btn.textContent = "Log in";
+      }
+    });
+
+    document.getElementById("forgot").addEventListener("click", async () => {
+      if (!email.value.trim()) { say("Type your email above first.", "error"); return; }
+      try {
+        await sendPasswordResetEmail(auth, email.value.trim());
+        say("If that email has an account, a reset link is on its way.", "ok");
+      } catch (err) {
+        say(friendlyError(err), "error");
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign up | Temo-Learn</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="auth-page page-signup">
+
+  <div id="site-header"></div>
+
+  <main>
+    <div class="panel frame">
+      <img class="frame-logo" src="images/logo-mark.png" alt="Temo-Learn" onerror="this.remove()">
+      <h1>Begin your journey</h1>
+      <p class="sub">Create your account to unlock lessons and games.</p>
+      <form id="form">
+        <div class="field"><label for="name">Full name</label><input id="name" autocomplete="name" maxlength="100" required></div>
+        <div class="field"><label for="email">Email</label><input id="email" type="email" autocomplete="email" required></div>
+        <div class="field"><label for="password">Password</label><input id="password" type="password" minlength="6" autocomplete="new-password" required></div>
+        <div class="field"><label for="confirm">Confirm password</label><input id="confirm" type="password" minlength="6" autocomplete="new-password" required></div>
+        <p class="form-msg" id="msg"></p>
+        <button class="btn btn-gold btn-block" id="submitBtn">Create account</button>
+      </form>
+      <p class="form-alt">Already have an account? <a href="login.html">Log in</a></p>
+    </div>
+  </main>
+
+  <div id="site-footer"></div>
+
+  <script type="module" src="js/layout.js"></script>
+  <script type="module" src="js/nav.js"></script>
+  <script type="module">
+    import { signUp, homeFor, friendlyError } from "./js/auth.js";
+
+    const form = document.getElementById("form");
+    const msg = document.getElementById("msg");
+    const btn = document.getElementById("submitBtn");
+
+    function say(text, kind = "") { msg.className = "form-msg " + kind; msg.textContent = text; }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      say("");
+      const password = document.getElementById("password").value;
+      if (password !== document.getElementById("confirm").value) {
+        say("Those passwords don't match.", "error");
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = "Creating your account...";
+      try {
+        const profile = await signUp(
+          document.getElementById("name").value.trim(),
+          document.getElementById("email").value.trim(),
+          password
+        );
+        location.href = homeFor(profile.role);
+      } catch (err) {
+        say(friendlyError(err), "error");
+        btn.disabled = false;
+        btn.textContent = "Create account";
+      }
+    });
+  </script>
+</body>
+</html>
