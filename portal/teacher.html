@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Teacher Home | Temo-Learn</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+    <link rel="icon" href="/images/favicon.png">
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/teacher-portal.css">
+</head>
+<body class="page-portal">
+
+<div id="portal-header"></div>
+
+<main class="container portal-main">
+    <div id="app"><p>Loading your dashboard...</p></div>
+</main>
+
+<script type="module">
+    import { requireRole } from "/js/auth.js";
+    import { mountPortal } from "/js/teacher-portal-layout.js";
+    import { listMyCourses } from "/js/courses.js";
+    import { db, collection, getDocs, query, where } from "/js/firebase.js";
+    import { esc } from "/js/course-data.js";
+
+    const { user, profile } = await requireRole(["teacher", "admin"]);
+    mountPortal({ profile, active: "Home" });
+    const app = document.getElementById("app");
+
+    // My courses
+    let courses = [];
+    try { courses = await listMyCourses(user); }
+    catch (err) { console.warn("Could not load courses", err); }
+    courses.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+
+    // Enrolments in my courses
+    let enrollments = [];
+    try {
+        const ids = courses.map((c) => c.id).slice(0, 30);   // Firestore "in" allows 30
+        if (ids.length) {
+            const snap = await getDocs(query(collection(db, "enrollments"), where("courseId", "in", ids)));
+            enrollments = snap.docs.map((d) => d.data());
+        }
+    } catch (err) { console.warn("Could not load enrolments", err); }
+
+    const total = courses.length;
+    const published = courses.filter((c) => c.status === "published").length;
+    const drafts = total - published;
+    const learners = new Set(enrollments.map((e) => e.uid)).size;
+    const completed = enrollments.filter((e) => e.completed).length;
+
+    const perCourse = {};
+    enrollments.forEach((e) => { perCourse[e.courseId] = (perCourse[e.courseId] || 0) + 1; });
+
+    const first = (profile.fullName || "").trim().split(" ")[0] || "there";
+    const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+    const rows = courses.slice(0, 6).map((c) => {
+        const isPub = c.status === "published";
+        return `
+        <li>
+          <a class="row-item" href="/portal/teacher-courses.html?edit=${encodeURIComponent(c.id)}">
+            <span class="row-icon">${esc(c.icon || "📜")}</span>
+            <span class="row-main">
+              <strong>${esc(c.title)}</strong>
+              <span>${esc(c.category || "General")} · ${plural(perCourse[c.id] || 0, "learner")}</span>
+            </span>
+            <span class="status-chip ${isPub ? "published" : "draft"}">${isPub ? "Published" : "Draft"}</span>
+          </a>
+        </li>`;
+    }).join("");
+
+    const coursesCard = total
+        ? `<ul class="row-list">${rows}</ul>
+         <p style="margin:16px 0 0"><a href="/portal/teacher-courses.html">See all my courses →</a></p>`
+        : `<div class="empty">
+           <p>You haven't created a course yet.</p>
+           <a class="btn btn-gold" href="/portal/teacher-courses.html?new=1">Create your first course</a>
+         </div>`;
+
+    const step = (done, text) =>
+        `<li class="${done ? "done" : ""}"><span class="check">${done ? "✓" : ""}</span><span>${text}</span></li>`;
+
+    app.innerHTML = `
+      <section class="portal-hero panel-dark">
+        <div>
+          <span class="hud-chip">Teacher portal</span>
+          <h1>Welcome, ${esc(first)}</h1>
+          <p>Build courses and modules, attach games, and watch your learners progress.</p>
+        </div>
+        <div class="hero-actions">
+          <a class="btn btn-gold" href="/portal/teacher-courses.html?new=1">＋ New course</a>
+          <a class="btn btn-ghost" href="/portal/teacher-games.html">🎮 My games</a>
+        </div>
+      </section>
+
+      <section class="stat-grid">
+        <div class="panel-dark stat"><div class="num">${total}</div><div class="lbl">Courses</div><div class="sub">${drafts} in draft</div></div>
+        <div class="panel-dark stat"><div class="num">${published}</div><div class="lbl">Published</div><div class="sub">Visible on the courses page</div></div>
+        <div class="panel-dark stat"><div class="num">${learners}</div><div class="lbl">Learners</div><div class="sub">Enrolled in your courses</div></div>
+        <div class="panel-dark stat"><div class="num">${completed}</div><div class="lbl">Completions</div><div class="sub">Finished a course</div></div>
+      </section>
+
+      <section class="portal-grid">
+        <div class="panel-dark portal-card">
+          <h2>My courses</h2>
+          ${coursesCard}
+        </div>
+
+        <div class="stack">
+          <div class="panel-dark portal-card">
+            <h2>Quick actions</h2>
+            <div class="quick-actions">
+              <a class="btn btn-gold" href="/portal/teacher-courses.html?new=1">＋ New course</a>
+              <a class="btn btn-ghost" href="/portal/teacher-games.html">🎮 New game</a>
+              <a class="btn btn-ghost" href="/portal/teacher-students.html">👥 My students</a>
+              <a class="btn btn-ghost" href="/courses.html">🌐 View public courses page</a>
+            </div>
+          </div>
+
+          <div class="panel-dark portal-card">
+            <h2>Getting started</h2>
+            <ul class="checklist">
+              ${step(total > 0, "Create a course")}
+              ${step(published > 0, "Build its modules and activities")}
+              ${step(published > 0, "Publish it so learners can enrol")}
+            </ul>
+          </div>
+        </div>
+      </section>`;
+</script>
+</body>
+</html>

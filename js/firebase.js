@@ -3,12 +3,12 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-aut
 import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyDhKl8T_jF2MxLr5A7jh2F8bLY8Az3z0bI",
-  authDomain: "temo-learn-application.firebaseapp.com",
-  projectId: "temo-learn-application",
-  storageBucket: "temo-learn-application.firebasestorage.app",
-  messagingSenderId: "632102481748",
-  appId: "1:632102481748:web:45a2dc76c7c8b6cb08e2c1"
+  apiKey: "bleh",
+  authDomain: "bleh",
+  projectId: "bleh",
+  storageBucket: "bleh",
+  messagingSenderId: "bleh",
+  appId: "bleh"
 };
 
 const app = initializeApp(firebaseConfig);

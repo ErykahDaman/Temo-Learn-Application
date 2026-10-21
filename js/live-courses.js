@@ -11,12 +11,14 @@ export async function fetchLiveCourses(timeoutMs = 4000) {
       id: c.id,
       title: c.title || "Untitled course",
       summary: c.teaser || c.summary || "",
-      description: c.summary || c.teaser || "",
+      description: c.description || c.summary || c.teaser || "",
       category: c.category || "General",
       icon: c.icon || "📜",
       thumbnail: c.thumbnail || "",
       level: c.level || "",
-      hours: c.hours || ""
+      hours: c.hours || "",
+      output: c.output || "",
+      game: c.game || ""
     }));
   } catch (err) {
     console.warn("Live courses unavailable, showing the built-in syllabus.", err);

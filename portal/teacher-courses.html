@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My Courses | Temo-Learn</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+  <link rel="icon" href="/images/favicon.png">
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/portal.css">
+  <link rel="stylesheet" href="/css/teacher-theme.css">
+  <link rel="stylesheet" href="/css/teacher-editor.css">
+</head>
+<body class="page-portal theme-teacher">
+
+<div id="portal-header"></div>
+
+<main class="container portal-main">
+  <div class="page-head">
+    <h1>My Courses</h1>
+    <div class="btn-row">
+      <button class="btn btn-gold" id="newBtn" type="button">＋ New course</button>
+      <button class="btn btn-ghost" id="syllabusBtn" type="button">📚 Start from the syllabus</button>
+    </div>
+  </div>
+  <div class="panel-dark portal-card" id="list"><p>Loading your courses...</p></div>
+</main>
+
+<script type="module">
+  import { requireRole } from "/js/auth.js";
+  import { mountPortal } from "/js/portal-layout.js";
+  import { listMyCourses } from "/js/courses.js";
+  import { createCourseDoc, createFromSyllabus, removeCourse } from "/js/teacher-api.js";
+  import { COURSES, esc } from "/js/course-data.js";
+  import { CATEGORIES } from "/js/games-data.js";
+  import { openModal, toast } from "/js/ui.js";
+
+  const { user, profile } = await requireRole(["teacher", "admin"]);
+  mountPortal({ profile, active: "My Courses" });
+
+  const params = new URLSearchParams(location.search);
+  const editId = params.get("edit");
+  const editorUrl = (id) => "/portal/course-editor.html?id=" + encodeURIComponent(id);
+
+  if (editId) {
+    location.replace(editorUrl(editId));
+  } else {
+    start();
+  }
+
+  async function start() {
+    const listEl = document.getElementById("list");
+    const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const LEVELS = ["Beginner", "Beginner friendly", "Beginner to intermediate", "Intermediate", "Experimental science"];
+    let courses = [];
+
+    async function load() {
+      try {
+        courses = await listMyCourses(user);
+      } catch (err) {
+        console.error(err);
+        listEl.innerHTML = `<div class="empty"><p>Couldn't load your courses. Check your connection and the Firestore rules, then refresh.</p></div>`;
+        return;
+      }
+      courses.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+      render();
+    }
+
+    function rowHTML(c) {
+      const pub = c.status === "published";
+      return `
+          <li>
+            <div class="row-item">
+              <span class="row-icon">${esc(c.icon || "📜")}</span>
+              <span class="row-main">
+                <strong>${esc(c.title)}</strong>
+                <span>${esc(c.category || "General")}${c.level ? " · " + esc(c.level) : ""}</span>
+              </span>
+              <span class="status-chip ${pub ? "published" : "draft"}">${pub ? "Published" : "Draft"}</span>
+              <span class="row-actions">
+                <a class="btn btn-gold btn-sm" href="${editorUrl(c.id)}">Edit</a>
+                <button class="btn btn-ghost btn-sm" data-del="${esc(c.id)}" type="button">Delete</button>
+              </span>
+            </div>
+          </li>`;
+    }
+
+    function render() {
+      if (!courses.length) {
+        listEl.innerHTML = `
+            <div class="empty">
+              <p>No courses yet. Start from scratch, or pick one of the 10 planned courses from the syllabus.</p>
+              <button class="btn btn-gold" id="emptyNew" type="button">＋ New course</button>
+              <button class="btn btn-ghost" id="emptySyl" type="button">📚 Start from the syllabus</button>
+            </div>`;
+        document.getElementById("emptyNew").onclick = openNewCourse;
+        document.getElementById("emptySyl").onclick = openSyllabus;
+        return;
+      }
+      listEl.innerHTML = `<ul class="row-list">${courses.map(rowHTML).join("")}</ul>`;
+    }
+
+    listEl.addEventListener("click", async (e) => {
+      const btn = e.target.closest("[data-del]");
+      if (!btn) return;
+      const c = courses.find((x) => x.id === btn.dataset.del);
+      if (!c) return;
+      if (!confirm(`Delete "${c.title}"? This removes its sections and activities and can't be undone.`)) return;
+      btn.disabled = true;
+      try {
+        await removeCourse(c.id);
+        courses = courses.filter((x) => x.id !== c.id);
+        render();
+        toast("Course deleted.");
+      } catch (err) {
+        console.error(err);
+        btn.disabled = false;
+        toast("Couldn't delete that course.", true);
+      }
+    });
+
+    function openNewCourse() {
+      const m = openModal(`
+          <h2>New course</h2>
+          <form id="nc">
+            <div class="field"><label for="nc-title">Course title</label><input id="nc-title" maxlength="120" required></div>
+            <div class="grid-2">
+              <div class="field"><label for="nc-cat">Category</label>
+                <select id="nc-cat">${CATEGORIES.map((c) => `<option>${esc(c)}</option>`).join("")}</select></div>
+              <div class="field"><label for="nc-level">Level</label>
+                <input id="nc-level" list="nc-levels" placeholder="e.g. Beginner to intermediate">
+                <datalist id="nc-levels">${LEVELS.map((l) => `<option value="${esc(l)}">`).join("")}</datalist></div>
+            </div>
+            <div class="field"><label for="nc-hours">Suggested duration</label><input id="nc-hours" placeholder="e.g. 12–16 hours"></div>
+            <div class="field"><label for="nc-summary">Short teaser (shows on the course card)</label><input id="nc-summary" maxlength="160"></div>
+            <div class="field"><label for="nc-desc">Course description</label><textarea id="nc-desc" rows="4"></textarea></div>
+            <p class="form-msg" id="nc-msg"></p>
+            <button class="btn btn-gold btn-block" id="nc-go">Create course</button>
+          </form>`, { wide: true });
+
+      m.$("#nc").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const go = m.$("#nc-go");
+        go.disabled = true;
+        go.textContent = "Creating...";
+        try {
+          const id = await createCourseDoc(user, {
+            title: m.$("#nc-title").value.trim(),
+            category: m.$("#nc-cat").value,
+            level: m.$("#nc-level").value.trim(),
+            hours: m.$("#nc-hours").value.trim(),
+            summary: m.$("#nc-summary").value.trim(),
+            description: m.$("#nc-desc").value.trim()
+          });
+          location.href = editorUrl(id);
+        } catch (err) {
+          console.error(err);
+          m.$("#nc-msg").className = "form-msg error";
+          m.$("#nc-msg").textContent = "Couldn't create the course. Check the Firestore rules and try again.";
+          go.disabled = false;
+          go.textContent = "Create course";
+        }
+      });
+    }
+
+    function openSyllabus() {
+      const mine = new Set(courses.map((c) => norm(c.title)));
+      const m = openModal(`
+          <h2>Start from the Temo-Learn syllabus</h2>
+          <p>Pick a planned course. You get a draft with its description, its four modules and a starter page in each, ready to edit.</p>
+          <div class="syllabus-pick">
+            ${COURSES.map((c) => `
+              <div class="row-item">
+                <span class="row-icon">${esc(c.icon)}</span>
+                <span class="row-main"><strong>${esc(c.number)}. ${esc(c.title)}</strong><span>${esc(c.level)} · ${esc(c.hours)}</span></span>
+                ${mine.has(norm(c.title))
+              ? '<span class="status-chip draft">Already yours</span>'
+              : `<button class="btn btn-gold btn-sm" data-use="${esc(c.id)}" type="button">Use this</button>`}
+              </div>`).join("")}
+          </div>`, { wide: true });
+
+      m.el.addEventListener("click", async (e) => {
+        const btn = e.target.closest("[data-use]");
+        if (!btn) return;
+        const s = COURSES.find((c) => c.id === btn.dataset.use);
+        if (!s) return;
+        btn.disabled = true;
+        btn.textContent = "Creating...";
+        try {
+          const id = await createFromSyllabus(user, s);
+          location.href = editorUrl(id);
+        } catch (err) {
+          console.error(err);
+          btn.disabled = false;
+          btn.textContent = "Use this";
+          toast("Couldn't create that course. Check the Firestore rules.", true);
+        }
+      });
+    }
+
+    document.getElementById("newBtn").onclick = openNewCourse;
+    document.getElementById("syllabusBtn").onclick = openSyllabus;
+
+    await load();
+    if (params.get("new")) openNewCourse();
+  }
+</script>
+</body>
+</html>

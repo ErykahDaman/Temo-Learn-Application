@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Course editor | Temo-Learn</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+    <link rel="icon" href="/images/favicon.png">
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/portal.css">
+    <link rel="stylesheet" href="/css/teacher-theme.css">
+    <link rel="stylesheet" href="/css/teacher-editor.css">
+</head>
+<body class="page-portal theme-teacher">
+
+<div id="portal-header"></div>
+
+<main class="container portal-main">
+    <div id="app"><p>Loading the course editor...</p></div>
+</main>
+
+<script type="module">
+    import { requireRole } from "/js/auth.js";
+    import { mountPortal } from "/js/portal-layout.js";
+    import * as api from "/js/teacher-api.js";
+    import { esc } from "/js/course-data.js";
+    import { GAMES, ACTIVITY_TYPES, CATEGORIES } from "/js/games-data.js";
+    import { resizeImage } from "/js/images.js";
+    import { openModal, toast } from "/js/ui.js";
+
+    const { user, profile } = await requireRole(["teacher", "admin"]);
+    mountPortal({ profile, active: "My Courses" });
+
+    const app = document.getElementById("app");
+    const courseId = new URLSearchParams(location.search).get("id");
+    const TYPE = Object.fromEntries(ACTIVITY_TYPES.map((t) => [t.id, t]));
+    const LEVELS = ["Beginner", "Beginner friendly", "Beginner to intermediate", "Intermediate", "Experimental science"];
+
+    let course = null;
+    let modules = [];
+    let tab = "course";
+    let thumbData = "";
+    const collapsed = new Set();
+
+    const nextOrder = (list) => list.reduce((mx, x) => Math.max(mx, x.order ?? -1), -1) + 1;
+    const swap = (arr, i, j) => { [arr[i], arr[j]] = [arr[j], arr[i]]; };
+    async function persistOrder(list, writer) {
+        await Promise.all(list.map((x, i) => (x.order === i ? null : writer(x, i))));
+        list.forEach((x, i) => { x.order = i; });
+    }
+
+    function message(html) {
+        app.innerHTML = `<div class="panel-dark portal-card empty">${html}<a class="btn btn-gold" href="/portal/teacher-courses.html">Back to My Courses</a></div>`;
+    }
+
+    async function fail(err) {
+        console.error(err);
+        const denied = err && err.code === "permission-denied";
+        toast(denied
+            ? "Permission denied. Check that the new Firestore rules are published."
+            : "Couldn't save that. Please try again.", true);
+        try { modules = await api.loadOutline(courseId); render(); } catch (e) { /* ignore */ }
+    }
+
+    /* ---------- Rendering ---------- */
+    function itemHTML(m, it, ii) {
+        const t = TYPE[it.type] || TYPE.page;
+        return `
+        <li class="item" data-iid="${esc(it.id)}">
+          <span class="item-icon">${t.icon}</span>
+          <span class="item-title">${esc(it.title)}</span>
+          <span class="item-meta">${t.label}${it.required ? " · required" : ""}</span>
+          <span class="item-tools">
+            <button class="icon-btn" data-act="item-edit" type="button" title="Edit">✎</button>
+            <button class="icon-btn" data-act="item-up" type="button" title="Move up" ${ii === 0 ? "disabled" : ""}>↑</button>
+            <button class="icon-btn" data-act="item-down" type="button" title="Move down" ${ii === m.items.length - 1 ? "disabled" : ""}>↓</button>
+            <button class="icon-btn" data-act="item-del" type="button" title="Delete">🗑</button>
+          </span>
+        </li>`;
+    }
+
+    function sectionHTML(m, mi) {
+        const isCollapsed = collapsed.has(m.id);
+        const items = (m.items || []).map((it, ii) => itemHTML(m, it, ii)).join("")
+            || '<li class="items-empty">No activities yet. Add the first one below.</li>';
+        return `
+        <section class="panel-dark sec${isCollapsed ? " collapsed" : ""}" data-mid="${esc(m.id)}">
+          <header class="sec-head">
+            <button class="icon-btn" data-act="collapse" type="button" title="Collapse or expand">${isCollapsed ? "▸" : "▾"}</button>
+            <input class="sec-title" data-act="rename" value="${esc(m.title)}" aria-label="Section title">
+            <span class="sec-tools">
+              <button class="icon-btn${m.locked ? " on" : ""}" data-act="lock" type="button"
+                title="${m.locked ? "Locked: learners can't open it. Click to unlock" : "Unlocked. Click to lock"}">${m.locked ? "🔒" : "🔓"}</button>
+              <button class="icon-btn" data-act="sec-up" type="button" title="Move up" ${mi === 0 ? "disabled" : ""}>↑</button>
+              <button class="icon-btn" data-act="sec-down" type="button" title="Move down" ${mi === modules.length - 1 ? "disabled" : ""}>↓</button>
+              <button class="icon-btn" data-act="sec-del" type="button" title="Delete section">🗑</button>
+            </span>
+          </header>
+          <div class="sec-body">
+            <ul class="items">${items}</ul>
+            <button class="btn btn-ghost btn-sm" data-act="add-item" type="button">＋ Add activity</button>
+          </div>
+        </section>`;
+    }
+
+    function courseTabHTML() {
+        const sections = modules.map(sectionHTML).join("");
+        const empty = modules.length ? "" : `
+        <div class="panel-dark portal-card empty" style="margin-bottom:18px">
+          <p>No sections yet. Sections are the modules learners move through, like Module 1, Module 2.</p>
+        </div>`;
+        return `${empty}${sections}<button class="btn btn-gold" data-act="add-section" type="button">＋ Add section</button>`;
+    }
+
+    function settingsHTML() {
+        const cats = !course.category || CATEGORIES.includes(course.category) ? CATEGORIES : [...CATEGORIES, course.category];
+        return `
+        <div class="panel">
+          <h2>Course settings</h2>
+          <div class="grid-2">
+            <div class="field"><label for="s-title">Title</label><input id="s-title" maxlength="120" value="${esc(course.title)}"></div>
+            <div class="field"><label for="s-category">Category</label>
+              <select id="s-category">${cats.map((c) => `<option${c === course.category ? " selected" : ""}>${esc(c)}</option>`).join("")}</select></div>
+            <div class="field"><label for="s-level">Level</label>
+              <input id="s-level" list="s-levels" value="${esc(course.level || "")}">
+              <datalist id="s-levels">${LEVELS.map((l) => `<option value="${esc(l)}">`).join("")}</datalist></div>
+            <div class="field"><label for="s-hours">Suggested duration</label><input id="s-hours" value="${esc(course.hours || "")}" placeholder="e.g. 12–16 hours"></div>
+            <div class="field"><label for="s-icon">Icon (an emoji)</label><input id="s-icon" maxlength="4" value="${esc(course.icon || "")}"></div>
+            <div class="field"><label for="s-game">Matching game</label>
+              <select id="s-game"><option value="">None yet</option>
+                ${GAMES.map((g) => `<option value="${g.id}"${g.name === course.game ? " selected" : ""}>${esc(g.name)}</option>`).join("")}
+              </select></div>
+          </div>
+          <div class="field"><label for="s-summary">Short teaser (shows on the course card)</label><input id="s-summary" maxlength="160" value="${esc(course.summary || course.teaser || "")}"></div>
+          <div class="field"><label for="s-description">Course description</label><textarea id="s-description" rows="5">${esc(course.description || "")}</textarea></div>
+          <div class="field"><label for="s-output">What learners will build or produce</label><textarea id="s-output" rows="2">${esc(course.output || "")}</textarea></div>
+          <div class="field">
+            <label for="s-thumb">Card picture (optional)</label>
+            <input id="s-thumb" type="file" accept="image/*">
+            <img class="thumb-preview" id="s-prev" alt=""${thumbData ? ` src="${esc(thumbData)}"` : " hidden"}>
+            <button class="btn btn-ghost btn-sm" data-act="remove-thumb" type="button">Remove picture</button>
+          </div>
+          <button class="btn btn-gold" data-act="save-settings" type="button">Save settings</button>
+        </div>`;
+    }
+
+    function render() {
+        const pub = course.status === "published";
+        app.innerHTML = `
+        <div class="editor-top">
+          <div>
+            <div class="crumbs"><a href="/portal/teacher-courses.html">My Courses</a> / Editor</div>
+            <h1>${esc(course.title)}</h1>
+          </div>
+          <div class="editor-actions">
+            <span class="status-chip ${pub ? "published" : "draft"}">${pub ? "Published" : "Draft"}</span>
+            <button class="btn btn-gold btn-sm" data-act="publish" type="button">${pub ? "Unpublish" : "Publish"}</button>
+          </div>
+        </div>
+        <div class="tabs">
+          <button class="tab${tab === "course" ? " active" : ""}" data-tab="course" type="button">Course</button>
+          <button class="tab${tab === "settings" ? " active" : ""}" data-tab="settings" type="button">Settings</button>
+        </div>
+        ${tab === "course" ? courseTabHTML() : settingsHTML()}`;
+    }
+
+    /* ---------- Activity popup ---------- */
+    const blankQ = () => ({ q: "", options: ["", "", "", ""], answer: 0 });
+
+    function openItemModal(m, item) {
+        const isEdit = !!item;
+        const draft = item ? JSON.parse(JSON.stringify(item)) : { type: "page", title: "", required: false };
+        let qs = draft.quiz && draft.quiz.questions && draft.quiz.questions.length
+            ? draft.quiz.questions.map((q) => {
+                const options = [...q.options];
+                while (options.length < 4) options.push("");
+                return { q: q.q, options, answer: q.answer };
+            })
+            : [blankQ()];
+
+        const modal = openModal(`
+        <h2>${isEdit ? "Edit activity" : "Add an activity"}</h2>
+        <div class="field"><label for="f-type">Type</label>
+          <select id="f-type">${ACTIVITY_TYPES.map((t) => `<option value="${t.id}"${t.id === draft.type ? " selected" : ""}>${t.icon} ${t.label}</option>`).join("")}</select></div>
+        <div class="field"><label for="f-title">Title</label><input id="f-title" maxlength="140" value="${esc(draft.title)}"></div>
+        <div id="f-extra"></div>
+        <label class="check-row"><input type="checkbox" id="f-required"${draft.required ? " checked" : ""}> Learners must mark this as done</label>
+        <p class="form-msg" id="f-msg"></p>
+        <div class="modal-actions">
+          <button class="btn btn-gold" id="f-save" type="button">${isEdit ? "Save changes" : "Add activity"}</button>
+          <button class="btn btn-ghost" data-x type="button">Cancel</button>
+        </div>`, { wide: true });
+
+        const extra = modal.$("#f-extra");
+
+        function renderQs() {
+            modal.$("#f-questions").innerHTML = qs.map((q, qi) => `
+          <div class="q-block">
+            <div class="field"><label>Question ${qi + 1}</label><input class="q-text" value="${esc(q.q)}"></div>
+            ${q.options.map((o, oi) => `
+              <div class="q-opt">
+                <input type="radio" name="ans-${qi}" value="${oi}"${q.answer === oi ? " checked" : ""} title="Mark as the correct answer">
+                <input type="text" class="q-o" value="${esc(o)}" placeholder="Option ${String.fromCharCode(65 + oi)}">
+              </div>`).join("")}
+            <button class="btn btn-ghost btn-sm" type="button" data-rmq="${qi}" style="margin-top:10px">Remove question</button>
+          </div>`).join("");
+        }
+
+        function syncQs() {
+            qs = [...modal.el.querySelectorAll(".q-block")].map((b) => {
+                const checked = b.querySelector('input[type="radio"]:checked');
+                return {
+                    q: b.querySelector(".q-text").value.trim(),
+                    options: [...b.querySelectorAll(".q-o")].map((i) => i.value.trim()),
+                    answer: checked ? Number(checked.value) : 0
+                };
+            });
+        }
+
+        function renderExtra(type) {
+            if (type === "page") {
+                extra.innerHTML = `<div class="field"><label for="f-content">Content</label>
+            <textarea id="f-content" rows="10" placeholder="Write the lesson here. Use # for headings, - for bullet points and **bold**.">${esc(draft.content || "")}</textarea></div>`;
+            } else if (type === "discussion") {
+                extra.innerHTML = `<div class="field"><label for="f-content">Discussion prompt</label>
+            <textarea id="f-content" rows="5" placeholder="What should learners discuss?">${esc(draft.content || "")}</textarea></div>`;
+            } else if (type === "video" || type === "link") {
+                extra.innerHTML = `
+            <div class="field"><label for="f-url">${type === "video" ? "Video link (YouTube or any video page)" : "Link to a file or website"}</label>
+              <input id="f-url" type="url" placeholder="https://..." value="${esc(draft.url || "")}"></div>
+            <div class="field"><label for="f-content">Notes for learners (optional)</label>
+              <textarea id="f-content" rows="4">${esc(draft.content || "")}</textarea></div>`;
+            } else if (type === "game") {
+                extra.innerHTML = `
+            <div class="field"><label for="f-game">Game</label>
+              <select id="f-game">${GAMES.map((g) => `<option value="${g.id}"${g.id === draft.gameId ? " selected" : ""}>${esc(g.name)}</option>`).join("")}</select></div>
+            <div class="field"><label for="f-content">Instructions (optional)</label>
+              <textarea id="f-content" rows="4">${esc(draft.content || "")}</textarea></div>`;
+            } else if (type === "quiz") {
+                extra.innerHTML = `
+            <div class="field"><label for="f-pass">Pass mark (%)</label>
+              <input id="f-pass" type="number" min="1" max="100" value="${esc(draft.quiz && draft.quiz.passMark ? draft.quiz.passMark : 70)}"></div>
+            <div id="f-questions"></div>
+            <button class="btn btn-ghost btn-sm" type="button" id="f-addq">＋ Add question</button>`;
+                renderQs();
+            }
+        }
+
+        renderExtra(draft.type);
+        modal.$("#f-type").addEventListener("change", (e) => { draft.type = e.target.value; renderExtra(draft.type); });
+
+        modal.el.addEventListener("click", (e) => {
+            if (e.target.id === "f-addq") { syncQs(); qs.push(blankQ()); renderQs(); }
+            const rm = e.target.closest("[data-rmq]");
+            if (rm) { syncQs(); qs.splice(Number(rm.dataset.rmq), 1); if (!qs.length) qs.push(blankQ()); renderQs(); }
+        });
+
+        modal.$("#f-save").addEventListener("click", async () => {
+            const q = (s) => modal.$(s);
+            const say = (t) => { q("#f-msg").className = "form-msg error"; q("#f-msg").textContent = t; };
+            const type = q("#f-type").value;
+            const title = q("#f-title").value.trim();
+            if (!title) return say("Give the activity a title.");
+
+            const data = { type, title, required: q("#f-required").checked };
+
+            if (type === "page" || type === "discussion") {
+                data.content = q("#f-content").value.trim();
+                if (!data.content) return say(type === "page" ? "Write some content for the page." : "Add a discussion prompt.");
+            } else if (type === "video" || type === "link") {
+                const url = q("#f-url").value.trim();
+                if (!/^https?:\/\//i.test(url)) return say("Enter a full link starting with http:// or https://");
+                data.url = url;
+                data.content = q("#f-content").value.trim();
+            } else if (type === "game") {
+                const g = GAMES.find((x) => x.id === q("#f-game").value);
+                data.gameId = g.id;
+                data.gameName = g.name;
+                data.content = q("#f-content").value.trim();
+            } else if (type === "quiz") {
+                syncQs();
+                const questions = [];
+                for (let i = 0; i < qs.length; i++) {
+                    const item = qs[i];
+                    if (!item.q) return say(`Question ${i + 1} needs some text.`);
+                    const correct = item.options[item.answer];
+                    const options = item.options.filter(Boolean);
+                    if (options.length < 2) return say(`Question ${i + 1} needs at least two options.`);
+                    if (!correct) return say(`Pick a correct answer for question ${i + 1}.`);
+                    questions.push({ q: item.q, options, answer: options.indexOf(correct) });
+                }
+                const passMark = Math.min(100, Math.max(1, Number(q("#f-pass").value) || 70));
+                data.quiz = { passMark, questions };
+            }
+
+            const btn = q("#f-save");
+            btn.disabled = true;
+            try {
+                if (isEdit) {
+                    const order = item.order ?? 0;
+                    await api.replaceItem(courseId, m.id, item.id, { ...data, order });
+                    const idx = m.items.findIndex((i) => i.id === item.id);
+                    m.items[idx] = { id: item.id, ...data, order };
+                } else {
+                    const order = nextOrder(m.items);
+                    const id = await api.addItem(courseId, m.id, { ...data, order });
+                    m.items.push({ id, ...data, order });
+                }
+                modal.close();
+                render();
+                toast(isEdit ? "Activity updated." : "Activity added.");
+            } catch (err) {
+                btn.disabled = false;
+                await fail(err);
+            }
+        });
+    }
+
+    /* ---------- Click handling ---------- */
+    app.addEventListener("click", async (e) => {
+        const tabBtn = e.target.closest("[data-tab]");
+        if (tabBtn) { tab = tabBtn.dataset.tab; render(); return; }
+
+        const btn = e.target.closest("button[data-act]");
+        if (!btn) return;
+        const act = btn.dataset.act;
+        const mid = btn.closest(".sec") ? btn.closest(".sec").dataset.mid : null;
+        const m = mid ? modules.find((x) => x.id === mid) : null;
+        const iid = btn.closest(".item") ? btn.closest(".item").dataset.iid : null;
+
+        try {
+            switch (act) {
+                case "collapse":
+                    collapsed.has(mid) ? collapsed.delete(mid) : collapsed.add(mid);
+                    render();
+                    break;
+
+                case "lock":
+                    m.locked = !m.locked;
+                    await api.updateModule(courseId, mid, { locked: m.locked });
+                    render();
+                    toast(m.locked ? "Section locked. Learners can't open it yet." : "Section unlocked.");
+                    break;
+
+                case "sec-up":
+                case "sec-down": {
+                    const i = modules.indexOf(m);
+                    const j = act === "sec-up" ? i - 1 : i + 1;
+                    if (j < 0 || j >= modules.length) break;
+                    swap(modules, i, j);
+                    await persistOrder(modules, (x, k) => api.updateModule(courseId, x.id, { order: k }));
+                    render();
+                    break;
+                }
+
+                case "sec-del":
+                    if (!confirm(`Delete "${m.title}" and all its activities?`)) break;
+                    await api.removeModule(courseId, mid);
+                    modules = modules.filter((x) => x.id !== mid);
+                    render();
+                    toast("Section deleted.");
+                    break;
+
+                case "add-section": {
+                    const order = nextOrder(modules);
+                    const id = await api.addModule(courseId, "New section", order);
+                    modules.push({ id, title: "New section", order, locked: false, items: [] });
+                    tab = "course";
+                    render();
+                    const titles = app.querySelectorAll(".sec-title");
+                    const last = titles[titles.length - 1];
+                    if (last) { last.focus(); last.select(); }
+                    break;
+                }
+
+                case "add-item":
+                    openItemModal(m, null);
+                    break;
+
+                case "item-edit":
+                    openItemModal(m, m.items.find((x) => x.id === iid));
+                    break;
+
+                case "item-up":
+                case "item-down": {
+                    const i = m.items.findIndex((x) => x.id === iid);
+                    const j = act === "item-up" ? i - 1 : i + 1;
+                    if (j < 0 || j >= m.items.length) break;
+                    swap(m.items, i, j);
+                    await persistOrder(m.items, (x, k) => api.updateItem(courseId, mid, x.id, { order: k }));
+                    render();
+                    break;
+                }
+
+                case "item-del": {
+                    const it = m.items.find((x) => x.id === iid);
+                    if (!confirm(`Delete "${it.title}"?`)) break;
+                    await api.removeItem(courseId, mid, iid);
+                    m.items = m.items.filter((x) => x.id !== iid);
+                    render();
+                    toast("Activity deleted.");
+                    break;
+                }
+
+                case "publish": {
+                    const next = course.status === "published" ? "draft" : "published";
+                    if (next === "published") {
+                        const count = modules.reduce((n, x) => n + (x.items ? x.items.length : 0), 0);
+                        if (!count) { toast("Add at least one activity before publishing.", true); break; }
+                    }
+                    await api.updateCourseDoc(courseId, { status: next });
+                    course.status = next;
+                    render();
+                    toast(next === "published" ? "Published. It now shows on the courses page." : "Moved back to draft.");
+                    break;
+                }
+
+                case "remove-thumb":
+                    thumbData = "";
+                { const prev = app.querySelector("#s-prev"); prev.hidden = true; prev.removeAttribute("src"); }
+                    break;
+
+                case "save-settings": {
+                    const val = (id) => app.querySelector("#" + id).value.trim();
+                    const title = val("s-title");
+                    if (!title) { toast("The course needs a title.", true); break; }
+                    const game = GAMES.find((g) => g.id === app.querySelector("#s-game").value);
+                    const patch = {
+                        title,
+                        category: val("s-category"),
+                        level: val("s-level"),
+                        hours: val("s-hours"),
+                        icon: val("s-icon") || "📜",
+                        summary: val("s-summary"),
+                        description: val("s-description"),
+                        output: val("s-output"),
+                        game: game ? game.name : "",
+                        thumbnail: thumbData
+                    };
+                    await api.updateCourseDoc(courseId, patch);
+                    Object.assign(course, patch, { teaser: patch.summary });
+                    render();
+                    toast("Settings saved.");
+                    break;
+                }
+            }
+        } catch (err) {
+            await fail(err);
+        }
+    });
+
+    app.addEventListener("change", async (e) => {
+        const t = e.target;
+
+        if (t.matches('input[data-act="rename"]')) {
+            const m = modules.find((x) => x.id === t.closest(".sec").dataset.mid);
+            const title = t.value.trim();
+            if (!title) { t.value = m.title; return; }
+            if (title === m.title) return;
+            try {
+                await api.updateModule(courseId, m.id, { title });
+                m.title = title;
+                toast("Section renamed.");
+            } catch (err) { await fail(err); }
+        }
+
+        if (t.id === "s-thumb" && t.files && t.files[0]) {
+            try {
+                thumbData = await resizeImage(t.files[0], 600, 0.7);
+                const prev = app.querySelector("#s-prev");
+                prev.src = thumbData;
+                prev.hidden = false;
+            } catch (err) { toast("Couldn't read that image.", true); }
+        }
+    });
+
+    /* ---------- Start ---------- */
+    (async function init() {
+        if (!courseId) return message("<p>No course selected.</p>");
+        try {
+            course = await api.getCourseDoc(courseId);
+            if (!course) return message("<p>That course doesn't exist.</p>");
+            if (course.authorId !== user.uid && profile.role !== "admin") {
+                return message("<p>You can only edit your own courses.</p>");
+            }
+            modules = await api.loadOutline(courseId);
+            thumbData = course.thumbnail || "";
+        } catch (err) {
+            console.error(err);
+            return message("<p>Couldn't load this course. Check your connection and the Firestore rules, then refresh.</p>");
+        }
+        render();
+    })();
+</script>
+</body>
+</html>

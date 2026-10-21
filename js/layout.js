@@ -7,14 +7,14 @@ const SITE = {
 const LINKS = [
   ["index.html", "Home"],
   ["courses.html", "Courses"],
-  ["about.html", "About"],
-  ["contact.html", "Contact"]
+  ["about.html", "About Us"],
+  ["contact.html", "Contact Us"]
 ];
 const here = (location.pathname.split("/").pop() || "index.html").toLowerCase();
 
 const navLinks = LINKS
-  .map(([file, label]) => `<a${here === file ? ' class="active"' : ""} href="${file}">${label}</a>`)
-  .join("");
+    .map(([file, label]) => `<a${here === file ? ' class="active"' : ""} href="${file}">${label}</a>`)
+    .join("");
 const footLinks = LINKS.map(([file, label]) => `<a href="${file}">${label}</a>`).join("");
 
 const headerHTML = `
@@ -28,8 +28,8 @@ const headerHTML = `
       <nav class="nav-links" id="navLinks">
         ${navLinks}
         <div class="nav-auth" id="nav-auth">
-          <a class="btn btn-ghost btn-sm" href="login.html">Log in</a>
-          <a class="btn btn-gold btn-sm" href="signup.html">Sign up</a>
+          <a class="btn btn-gold btn-sm" href="signup.html">Sign Up</a>
+          <a class="btn btn-ghost btn-sm" href="login.html">Login</a>
         </div>
       </nav>
     </div>
@@ -42,14 +42,17 @@ const footerHTML = `
         <strong>${SITE.name}</strong>
         <p>${SITE.blurb}</p>
       </div>
-      <nav class="footer-links">${footLinks}<a href="login.html">Log in</a></nav>
+      <nav class="footer-links">${footLinks}<a href="signup.html">Sign Up</a><a href="login.html">Login</a></nav>
     </div>
     <p class="footer-note">© ${new Date().getFullYear()} ${SITE.name} · Learn · Grow · Thrive</p>
   </footer>`;
 
 function mount(id, html) {
   const slot = document.getElementById(id);
-  if (!slot) return;
+  if (!slot) {
+    console.warn(`layout.js: no element with id="${id}" on this page.`);
+    return;
+  }
   const tpl = document.createElement("template");
   tpl.innerHTML = html.trim();
   slot.replaceWith(tpl.content);
